@@ -67,6 +67,19 @@ describe("timeline", () => {
     ]);
   });
 
+  test("a stage announced twice in a row is one section", () => {
+    const items = timeline(
+      [
+        ev({ kind: "stage", stream: null, stage: "provision", state: "started", turn_id: null }),
+        ev({ kind: "stage", stream: null, stage: "provision", state: "started", turn_id: null }),
+        ev({ kind: "stage", stream: null, stage: "provision", state: "done", turn_id: null }),
+      ],
+      [],
+    );
+    expect(items.length).toBe(1);
+    expect(isSection(items[0]!) && sectionState(items[0]!)).toBe("done");
+  });
+
   test("a mismatched close is kept as a loose event", () => {
     const items = timeline([ev({ kind: "stage", stream: null, stage: "clone", state: "done", turn_id: null })], []);
     expect(items.length).toBe(1);

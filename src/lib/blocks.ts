@@ -103,6 +103,11 @@ export function timeline(events: LogEvent[], turns: Turn[]): (Section | LogEvent
 
   for (const ev of events) {
     if (ev.kind === "stage" && ev.state === "started" && ev.stage) {
+      // A repeated `started` for the stage already open on top, with nothing
+      // in between, is the same stage announced twice (a retry, two writers)
+      // — one section, not a nest of one inside the other.
+      const top = stack[stack.length - 1]!;
+      if (top.section?.stage === ev.stage && top.children.length === 0) continue;
       stack.push({
         section: { kind: "section", key: `s${ev.id}`, stage: ev.stage, started: ev, ended: null, turn: turnOf(ev), children: [] },
         children: [],

@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { clearSettings, loadSettings, saveSettings, type Settings } from "./lib/settings";
 import { SettingsScreen } from "./components/Settings";
+import { completeLoginIfCallback, revoke } from "./lib/oauth";
+import { FountainClient } from "./api/client";
 import { StoreProvider, useStore } from "./store";
 import { useRoute, paths } from "./router";
 import { IndexPage } from "./pages/Index";
@@ -15,16 +17,43 @@ import { VaultsPage, VaultFormPage } from "./pages/Vaults";
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(() => loadSettings());
   const [editing, setEditing] = useState(false);
+  const [oauthBusy, setOauthBusy] = useState(() => /[?&](code|error)=/.test(window.location.search));
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  // If we came back from Fountain's consent page, finish the exchange before
+  // rendering anything else.
+  useEffect(() => {
+    completeLoginIfCallback()
+      .then(async (result) => {
+        if (!result) return;
+        const s: Settings = { baseUrl: result.baseUrl, apiKey: result.apiKey, via: "oauth" };
+        try {
+          await new FountainClient(s).me();
+          saveSettings(s);
+          setSettings(s);
+        } catch {
+          setOauthError("Signed in, but that Fountain could not be reached.");
+        }
+      })
+      .catch((err) => setOauthError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setOauthBusy(false));
+  }, []);
+
+  if (oauthBusy) {
+    return <div className="settings"><div className="settings-card"><h1>Signing in…</h1></div></div>;
+  }
 
   if (!settings || editing) {
     return (
       <SettingsScreen
         initial={settings}
+        error={oauthError}
         onCancel={settings ? () => setEditing(false) : undefined}
         onConnected={(s) => {
           saveSettings(s);
           setSettings(s);
           setEditing(false);
+          setOauthError(null);
         }}
       />
     );
@@ -34,6 +63,7 @@ export function App() {
       <Shell
         onSettings={() => setEditing(true)}
         onSignOut={() => {
+          if (settings.via === "oauth") void revoke(settings.baseUrl, settings.apiKey);
           clearSettings();
           setSettings(null);
         }}

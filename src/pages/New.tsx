@@ -26,7 +26,9 @@ export function NewPage({ parentId }: { parentId?: string }) {
         setAgents(a);
         setEnvs(e);
         setVaults(v);
-        setAgentId(a[0]?.id ?? "");
+        const preselected = sessionStorage.getItem("fountain-conversations.new-agent");
+        sessionStorage.removeItem("fountain-conversations.new-agent");
+        setAgentId(preselected && a.some((x) => x.id === preselected) ? preselected : a[0]?.id ?? "");
       })
       .catch((err) => !cancelled && setError(describeError(err)));
     return () => {
@@ -83,9 +85,7 @@ export function NewPage({ parentId }: { parentId?: string }) {
       {agents && agents.length === 0 && (
         <div className="empty">
           <p>No agents defined yet.</p>
-          <a href={`${client.baseUrl}/agents/new`} target="_blank" rel="noreferrer">
-            Create one in Fountain
-          </a>
+          <a href="#/agents/new">Create one</a>
         </div>
       )}
       {agents && agents.length > 0 && (

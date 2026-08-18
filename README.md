@@ -1,9 +1,10 @@
 # fountain-conversations
 
-A standalone client for [Fountain](https://github.com/BinaryBourbon/fountain)
-conversations: list them, start one, watch an agent work turn by turn, and
-drive it — the `/conversations` pages as a static app on its own origin,
-talking only to the Fountain API with an API key you paste in once.
+A standalone client for [Fountain](https://github.com/BinaryBourbon/fountain):
+conversations (list, start, watch an agent work turn by turn, drive it) and
+the agents, environments and vaults they run on — the user-facing pages as a
+static app on its own origin, talking only to the Fountain API with an API key
+you paste in once.
 
 - **Conversations** — every conversation, live status and unread dots over one
   SSE connection, sort by activity or creation, roots-only, delete.
@@ -17,6 +18,15 @@ talking only to the Fountain API with an API key you paste in once.
   sub-conversation navigation; a link to the raw log.
 - **Logs** — the raw event rows as stored, tailing live, filterable by stream
   and text.
+- **Agents** — list, search, filter by runtime; create/edit with runtime, model
+  (suggestions from `GET /api/catalog`), system prompt, environment, sandbox
+  provider, skills (GitHub via skills.sh or inline SKILL.md), MCP servers,
+  launch-time allowlists for environments and vaults, avatar upload or
+  generation (`POST /api/avatars/generate`).
+- **Environments** — list; create/edit with packages, env vars, repositories,
+  setup script, network policy; secrets set/deleted (write-only, encrypted at
+  rest).
+- **Vaults** — list; create/edit with secrets.
 
 Nothing here parses a runtime's output. Fountain serves every event with
 **server-parsed blocks** (`?blocks=true` — text, thinking, tool_use,
@@ -64,6 +74,7 @@ The only build-time knob is `VITE_BASE`, the path the files are served under
 | Transcript | `GET /api/conversations/:id/turns` + `/events?blocks=true` (paged until drained) |
 | Prompt, interrupt, terminate, delete, read | `POST …/prompts`, `POST …/interrupt`, `POST …/terminate`, `DELETE`, `POST …/read` |
 | Spawn tree, images | `GET …/tree`, `GET …/turns/:turn_id/images/:position` |
+| Agents / environments / vaults | `/api/agents`, `/api/environments` (+ `/secrets`), `/api/vaults` (+ `/secrets`), `/api/agents/:id/avatar`, `GET /api/catalog`, `POST /api/avatars/generate` |
 
 `EventSource` cannot send an `Authorization` header, so the stream is read
 with `fetch` (`src/lib/sse.ts`). Markdown in replies is rendered by a small

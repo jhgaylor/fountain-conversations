@@ -5,11 +5,15 @@
  */
 import type {
   Agent,
+  AgentInput,
+  Catalog,
   Conversation,
   Environment,
+  EnvironmentInput,
   ImageInput,
   LogEvent,
   Me,
+  Secret,
   TreeNode,
   Turn,
   Vault,
@@ -127,6 +131,96 @@ export class FountainClient {
     return (await this.json<{ data: Vault[] }>("GET", "/api/vaults")).data;
   }
 
+  // ── agents / environments / vaults ──────────────────────────────────────
+
+  async catalog(): Promise<Catalog> {
+    return (await this.json<{ data: Catalog }>("GET", "/api/catalog")).data;
+  }
+
+  async getAgent(id: string): Promise<Agent> {
+    return (await this.json<{ data: Agent }>("GET", `/api/agents/${id}`)).data;
+  }
+
+  async createAgent(input: AgentInput): Promise<Agent> {
+    return (await this.json<{ data: Agent }>("POST", "/api/agents", input)).data;
+  }
+
+  async updateAgent(id: string, input: Partial<AgentInput>): Promise<Agent> {
+    return (await this.json<{ data: Agent }>("PUT", `/api/agents/${id}`, input)).data;
+  }
+
+  deleteAgent(id: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/agents/${id}`);
+  }
+
+  async putAvatar(id: string, image: ImageInput): Promise<Agent> {
+    return (await this.json<{ data: Agent }>("PUT", `/api/agents/${id}/avatar`, image)).data;
+  }
+
+  deleteAvatar(id: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/agents/${id}/avatar`);
+  }
+
+  async generateAvatar(base: string, mood: string): Promise<ImageInput> {
+    return (await this.json<{ data: ImageInput }>("POST", "/api/avatars/generate", { base, mood })).data;
+  }
+
+  async getEnvironment(id: string): Promise<Environment> {
+    return (await this.json<{ data: Environment }>("GET", `/api/environments/${id}`)).data;
+  }
+
+  async createEnvironment(input: EnvironmentInput): Promise<Environment> {
+    return (await this.json<{ data: Environment }>("POST", "/api/environments", input)).data;
+  }
+
+  async updateEnvironment(id: string, input: Partial<EnvironmentInput>): Promise<Environment> {
+    return (await this.json<{ data: Environment }>("PUT", `/api/environments/${id}`, input)).data;
+  }
+
+  deleteEnvironment(id: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/environments/${id}`);
+  }
+
+  async listEnvSecrets(envId: string): Promise<Secret[]> {
+    return (await this.json<{ data: Secret[] }>("GET", `/api/environments/${envId}/secrets`)).data;
+  }
+
+  putEnvSecret(envId: string, key: string, value: string): Promise<unknown> {
+    return this.json("POST", `/api/environments/${envId}/secrets`, { key, value });
+  }
+
+  deleteEnvSecret(envId: string, key: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/environments/${envId}/secrets/${encodeURIComponent(key)}`);
+  }
+
+  async getVault(id: string): Promise<Vault> {
+    return (await this.json<{ data: Vault }>("GET", `/api/vaults/${id}`)).data;
+  }
+
+  async createVault(input: { name: string; description?: string }): Promise<Vault> {
+    return (await this.json<{ data: Vault }>("POST", "/api/vaults", input)).data;
+  }
+
+  async updateVault(id: string, input: { name?: string; description?: string }): Promise<Vault> {
+    return (await this.json<{ data: Vault }>("PUT", `/api/vaults/${id}`, input)).data;
+  }
+
+  deleteVault(id: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/vaults/${id}`);
+  }
+
+  async listVaultSecrets(vaultId: string): Promise<Secret[]> {
+    return (await this.json<{ data: Secret[] }>("GET", `/api/vaults/${vaultId}/secrets`)).data;
+  }
+
+  putVaultSecret(vaultId: string, key: string, value: string): Promise<unknown> {
+    return this.json("POST", `/api/vaults/${vaultId}/secrets`, { key, value });
+  }
+
+  deleteVaultSecret(vaultId: string, key: string): Promise<void> {
+    return this.json<void>("DELETE", `/api/vaults/${vaultId}/secrets/${encodeURIComponent(key)}`);
+  }
+
   // ── streams ─────────────────────────────────────────────────────────────
 
   /** Every conversation's events on one connection, with blocks. Resolves when the server closes. */
@@ -179,15 +273,28 @@ export class FountainClient {
       }
     }
     if (!res.ok) {
-      const obj = (parsed ?? {}) as { error?: unknown; message?: unknown };
+      const obj = (parsed ?? {}) as { error?: unknown; message?: unknown; errors?: unknown };
       const code = typeof obj.error === "string" ? obj.error : null;
       const message =
-        typeof obj.message === "string" ? obj.message : code ?? `${res.status} ${res.statusText}`;
+        typeof obj.message === "string"
+          ? obj.message
+          : changesetMessage(obj.errors) ?? code ?? `${res.status} ${res.statusText}`;
       const ra = res.headers.get("retry-after");
       throw new ApiError(res.status, code, message, ra ? Number(ra) : null);
     }
     return parsed as T;
   }
+}
+
+/** Ecto changeset errors — `{errors: {field: ["msg"]}}` — as one line. */
+function changesetMessage(errors: unknown): string | null {
+  if (!errors || typeof errors !== "object") return null;
+  const parts: string[] = [];
+  for (const [field, msgs] of Object.entries(errors as Record<string, unknown>)) {
+    if (Array.isArray(msgs)) parts.push(`${field} ${msgs.map(String).join(", ")}`);
+    else if (typeof msgs === "string") parts.push(`${field} ${msgs}`);
+  }
+  return parts.length ? parts.join("; ") : null;
 }
 
 /** A human line for an API failure. */

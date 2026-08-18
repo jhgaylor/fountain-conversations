@@ -51,78 +51,101 @@ export function assistantText(events: LogEvent[]): string {
     .trim();
 }
 
-export interface StageItem {
-  kind: "stage";
+export interface Section {
+  kind: "section";
   key: string;
   stage: string;
   started: LogEvent | null;
   ended: LogEvent | null;
   turn: Turn | null;
-  events: LogEvent[];
+  children: (Section | LogEvent)[];
 }
 
 /**
- * The timeline: stage events paired start→end in order, with the output
- * events that happened under each. Turn stages carry their turn.
+ * The timeline as the web UI groups it: a `started` stage event opens a
+ * section that holds everything until its matching end, sections nest
+ * (provision > packages > clone), and an output event goes to the open
+ * section whose stage matches its own `stage` field — apt's stdout under
+ * `packages` even while `provision` is open above it. A mismatched close
+ * becomes a loose event so nothing is lost; still-open sections at the end
+ * of the stream are the ones in flight.
  */
-export function timeline(events: LogEvent[], turns: Turn[]): StageItem[] {
+export function timeline(events: LogEvent[], turns: Turn[]): (Section | LogEvent)[] {
   const byId = new Map(turns.map((t) => [t.id, t]));
-  const items: StageItem[] = [];
-  const open = new Map<string, StageItem>(); // stage(+turn) → item
+  type Frame = { section: Section | null; children: (Section | LogEvent)[] };
+  const stack: Frame[] = [{ section: null, children: [] }];
 
-  const keyOf = (ev: LogEvent) => `${ev.stage}:${ev.turn_id ?? ""}`;
+  const turnOf = (ev: LogEvent): Turn | null => {
+    const id = ev.turn_id ?? dataField(ev, "turn_id");
+    return id ? byId.get(id) ?? null : null;
+  };
 
-  for (const ev of events) {
-    if (ev.kind === "stage" && ev.stage) {
-      const key = keyOf(ev);
-      if (ev.state === "started") {
-        const item: StageItem = {
-          kind: "stage",
-          key: `${key}:${ev.id}`,
-          stage: ev.stage,
-          started: ev,
-          ended: null,
-          turn: ev.turn_id ? byId.get(ev.turn_id) ?? null : null,
-          events: [],
-        };
-        items.push(item);
-        open.set(key, item);
-      } else {
-        const item = open.get(key);
-        if (item) {
-          item.ended = ev;
-          open.delete(key);
-        } else {
-          items.push({
-            kind: "stage",
-            key: `${key}:${ev.id}`,
-            stage: ev.stage,
-            started: null,
-            ended: ev,
-            turn: ev.turn_id ? byId.get(ev.turn_id) ?? null : null,
-            events: [],
-          });
+  const pushEvent = (ev: LogEvent) => {
+    // Route output to the frame whose stage matches; else the innermost.
+    let target = stack[stack.length - 1]!;
+    if (ev.kind === "output" && ev.stage) {
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (stack[i]!.section?.stage === ev.stage) {
+          target = stack[i]!;
+          break;
         }
       }
-    } else if (ev.kind === "output") {
-      // Output belongs to the open stage of its turn (or the latest open one).
-      const target =
-        (ev.turn_id && open.get(`turn:${ev.turn_id}`)) ||
-        [...open.values()].pop() ||
-        items[items.length - 1];
-      if (target) target.events.push(ev);
-      else items.push({ kind: "stage", key: `orphan:${ev.id}`, stage: "output", started: null, ended: null, turn: null, events: [ev] });
+    }
+    target.children.push(ev);
+  };
+
+  const close = (frame: Frame, ended: LogEvent | null) => {
+    const sec = frame.section!;
+    sec.ended = ended;
+    sec.children = frame.children;
+    stack[stack.length - 1]!.children.push(sec);
+  };
+
+  for (const ev of events) {
+    if (ev.kind === "stage" && ev.state === "started" && ev.stage) {
+      stack.push({
+        section: { kind: "section", key: `s${ev.id}`, stage: ev.stage, started: ev, ended: null, turn: turnOf(ev), children: [] },
+        children: [],
+      });
+    } else if (ev.kind === "stage" && ev.stage && ev.state && ev.state !== "started") {
+      const top = stack[stack.length - 1]!;
+      if (top.section && top.section.stage === ev.stage) {
+        stack.pop();
+        close(top, ev);
+      } else {
+        pushEvent(ev); // mismatched close: loose
+      }
+    } else {
+      pushEvent(ev);
     }
   }
-  return items;
+  while (stack.length > 1) {
+    const top = stack.pop()!;
+    close(top, null);
+  }
+  return stack[0]!.children;
 }
 
-export function stageState(item: StageItem): "running" | "done" | "failed" | "interrupted" | "unknown" {
-  if (item.ended?.state === "done") return "done";
-  if (item.ended?.state === "failed") return "failed";
-  if (item.ended?.state === "interrupted") return "interrupted";
-  if (item.started && !item.ended) return "running";
+function dataField(ev: LogEvent, key: string): string | null {
+  if (!ev.data) return null;
+  try {
+    const v = (JSON.parse(ev.data) as Record<string, unknown>)[key];
+    return typeof v === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+export function sectionState(s: Section): "running" | "done" | "failed" | "interrupted" | "unknown" {
+  if (s.ended?.state === "done") return "done";
+  if (s.ended?.state === "failed") return "failed";
+  if (s.ended?.state === "interrupted") return "interrupted";
+  if (s.started && !s.ended) return "running";
   return "unknown";
+}
+
+export function isSection(x: Section | LogEvent): x is Section {
+  return (x as Section).kind === "section";
 }
 
 export function formatDuration(ms: number | null | undefined): string {

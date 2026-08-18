@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import { navigate, paths } from "../router";
 import { describeError, THREAD_STREAMS } from "../api/client";
 import type { Conversation, ImageInput, LogEvent, TreeNode, Turn, UserEvent } from "../api/types";
-import { arrange, formatDuration, stageState, timeline } from "../lib/blocks";
+import { arrange, formatDuration, isSection, sectionState, timeline, type Section } from "../lib/blocks";
 import { loadPrefs, savePrefs } from "../lib/prefs";
 import { conversationLabel, formatClock, formatTime, shortId } from "../lib/format";
 import { BlockView } from "../components/Blocks";
@@ -250,31 +250,13 @@ export function ShowPage({ id }: { id: string }) {
               <ChatTurn key={turn.id} turn={turn} events={eventsByTurn.get(turn.id) ?? []} conversationId={id} agentName={agent?.name ?? current?.runtime ?? "agent"} />
             ))}
           {prefs.viewMode === "timeline" &&
-            items.map((item) => (
-              <div key={item.key} className={`stage ${stageState(item)}`}>
-                <div className="stage-head">
-                  <span className="stage-dot" />
-                  <span className="stage-name">{item.stage}</span>
-                  {item.turn && <span className="stage-turn">turn {item.turn.turn_number}</span>}
-                  <span className="stage-state muted">{stageState(item)}</span>
-                  {item.ended?.duration_ms != null && <span className="muted">{formatDuration(item.ended.duration_ms)}</span>}
-                  <span className="stage-time muted">{formatClock(item.started?.ts ?? item.ended?.ts)}</span>
-                </div>
-                {item.turn && (
-                  <div className="stage-prompt">
-                    <div className="label">prompt</div>
-                    <div className="md">{renderMarkdown(item.turn.prompt)}</div>
-                    {item.turn.image_count > 0 && <TurnImages conversationId={id} turn={item.turn} />}
-                  </div>
-                )}
-                {(item.started?.data || item.ended?.data) && stageMeta(item.started, item.ended)}
-                <div className="stage-blocks">
-                  {arrange(item.events, visible).map((b, i) => (
-                    <BlockView key={i} block={b} />
-                  ))}
-                </div>
-              </div>
-            ))}
+            items.map((item, i) =>
+              isSection(item) ? (
+                <SectionView key={item.key} section={item} visible={visible} conversationId={id} />
+              ) : (
+                <LooseEvent key={item.id ?? i} ev={item} visible={visible} />
+              ),
+            )}
         </div>
         {showTree && (
           <aside className="tree">
@@ -311,6 +293,80 @@ export function ShowPage({ id }: { id: string }) {
         </button>
       </form>
     </div>
+  );
+}
+
+function SectionView({ section, visible, conversationId }: { section: Section; visible: Set<string>; conversationId: string }) {
+  const state = sectionState(section);
+  // Adjacent output events render as one arranged run; nested sections in place.
+  const runs: Array<{ kind: "run"; events: LogEvent[] } | { kind: "section"; section: Section }> = [];
+  for (const child of section.children) {
+    if (isSection(child)) runs.push({ kind: "section", section: child });
+    else {
+      const last = runs[runs.length - 1];
+      if (last && last.kind === "run") last.events.push(child);
+      else runs.push({ kind: "run", events: [child] });
+    }
+  }
+  const hiddenStage = !visible.has("stage");
+  return (
+    <div className={`stage ${state} ${hiddenStage ? "no-stage" : ""}`}>
+      {!hiddenStage && (
+        <div className="stage-head">
+          <span className="stage-dot" />
+          <span className="stage-name">{section.stage}</span>
+          {section.turn && <span className="stage-turn">turn {section.turn.turn_number}</span>}
+          <span className="stage-state muted">{state}</span>
+          {section.ended?.duration_ms != null && <span className="muted">{formatDuration(section.ended.duration_ms)}</span>}
+          <span className="stage-time muted">{formatClock(section.started?.ts ?? section.ended?.ts)}</span>
+        </div>
+      )}
+      {section.turn && (
+        <div className="stage-prompt">
+          <div className="label">prompt</div>
+          <div className="md">{renderMarkdown(section.turn.prompt)}</div>
+          {section.turn.image_count > 0 && <TurnImages conversationId={conversationId} turn={section.turn} />}
+        </div>
+      )}
+      {!hiddenStage && stageMeta(section.started, section.ended)}
+      <div className="stage-blocks">
+        {runs.map((r, i) =>
+          r.kind === "section" ? (
+            <SectionView key={r.section.key} section={r.section} visible={visible} conversationId={conversationId} />
+          ) : (
+            <div key={i} className="stage-run">
+              {arrange(r.events.filter((e) => e.kind === "output"), visible).map((b, j) => (
+                <BlockView key={j} block={b} />
+              ))}
+              {r.events
+                .filter((e) => e.kind === "stage" && visible.has("stage"))
+                .map((e) => (
+                  <LooseEvent key={e.id} ev={e} visible={visible} />
+                ))}
+            </div>
+          ),
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LooseEvent({ ev, visible }: { ev: LogEvent; visible: Set<string> }) {
+  if (ev.kind === "stage") {
+    if (!visible.has("stage")) return null;
+    return (
+      <div className="stage-loose mono muted">
+        {ev.stage}/{ev.state} {formatClock(ev.ts)}
+        {ev.duration_ms != null && ` · ${formatDuration(ev.duration_ms)}`}
+      </div>
+    );
+  }
+  return (
+    <>
+      {arrange([ev], visible).map((b, i) => (
+        <BlockView key={i} block={b} />
+      ))}
+    </>
   );
 }
 

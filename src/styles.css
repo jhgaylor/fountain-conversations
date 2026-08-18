@@ -231,3 +231,6 @@ details.init summary { color: var(--text-2); }
   .host { display: none; }
   .show-title .name { max-width: 100%; }
 }
+.stage.no-stage { border-left: 0; margin-left: 0; padding-left: 0; }
+.stage-run { display: flex; flex-direction: column; gap: 6px; }
+.stage-loose { font-size: 11px; padding: 2px 0; }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { arrange, assistantText, timeline, stageState } from "./blocks";
+import { arrange, assistantText, timeline, sectionState, isSection } from "./blocks";
 import type { LogEvent, Turn } from "../api/types";
 
 let id = 0;
@@ -40,21 +40,36 @@ describe("arrange", () => {
 });
 
 describe("timeline", () => {
-  test("pairs stage start/end and nests a turn's output under it", () => {
-    const turns: Turn[] = [{ id: "t1", turn_number: 1, prompt: "hi", status: "completed", exit_code: 0, started_at: null, ended_at: null, inserted_at: "", image_count: 0 }];
+  const turns: Turn[] = [{ id: "t1", turn_number: 1, prompt: "hi", status: "completed", exit_code: 0, started_at: null, ended_at: null, inserted_at: "", image_count: 0 }];
+
+  test("nests sections, routes output by stage, and pairs the turn from its data", () => {
     const events = [
       ev({ kind: "stage", stream: null, stage: "provision", state: "started", turn_id: null }),
+      ev({ kind: "stage", stream: null, stage: "packages", state: "started", turn_id: null, data: '{"commands":1}' }),
+      ev({ kind: "output", stream: "stdout", stage: "packages", turn_id: null, blocks: [{ kind: "raw", body: "apt…" }] }),
+      ev({ kind: "stage", stream: null, stage: "packages", state: "done", turn_id: null }),
       ev({ kind: "stage", stream: null, stage: "provision", state: "done", turn_id: null, duration_ms: 1200 }),
-      ev({ kind: "stage", stream: null, stage: "turn", state: "started" }),
-      ev({ blocks: [{ kind: "text", body: "reply" }] }),
+      ev({ kind: "stage", stream: null, stage: "turn", state: "started", turn_id: null, data: '{"turn_id":"t1"}' }),
+      ev({ stage: "turn", blocks: [{ kind: "text", body: "reply" }] }),
       ev({ kind: "stage", stream: null, stage: "turn", state: "done", duration_ms: 3000 }),
       ev({ kind: "stage", stream: null, stage: "sandbox", state: "started", turn_id: null }),
     ];
     const items = timeline(events, turns);
-    expect(items.map((i) => [i.stage, stageState(i), i.events.length, i.turn?.prompt ?? null])).toEqual([
-      ["provision", "done", 0, null],
-      ["turn", "done", 1, "hi"],
-      ["sandbox", "running", 0, null],
+    const shape = items.map((i) =>
+      isSection(i)
+        ? [i.stage, sectionState(i), i.turn?.prompt ?? null, i.children.map((c) => (isSection(c) ? `${c.stage}:${c.children.length}` : "ev"))]
+        : "loose",
+    );
+    expect(shape).toEqual([
+      ["provision", "done", null, ["packages:1"]],
+      ["turn", "done", "hi", ["ev"]],
+      ["sandbox", "running", null, []],
     ]);
+  });
+
+  test("a mismatched close is kept as a loose event", () => {
+    const items = timeline([ev({ kind: "stage", stream: null, stage: "clone", state: "done", turn_id: null })], []);
+    expect(items.length).toBe(1);
+    expect(isSection(items[0]!)).toBe(false);
   });
 });

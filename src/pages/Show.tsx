@@ -3,17 +3,24 @@ import { useStore } from "../store";
 import { navigate, paths } from "../router";
 import { describeError, THREAD_STREAMS } from "../api/client";
 import type { Conversation, ImageInput, LogEvent, TreeNode, Turn, UserEvent } from "../api/types";
-import { arrange, formatDuration, isSection, sectionState, timeline, type Section } from "../lib/blocks";
-import { loadPrefs, savePrefs } from "../lib/prefs";
+import { arrange, isSection, timeline, type Section } from "../lib/blocks";
+import { childMode, defaultOpen, eventVisible, formatDurationMs, hiddenInPretty, sectionDuration, stageExtra, stageIcon } from "../lib/stages";
+import { loadPrefs, savePrefs, type ViewMode } from "../lib/prefs";
 import { conversationLabel, formatClock, formatTime, shortId } from "../lib/format";
 import { BlockView } from "../components/Blocks";
 import { StatusPill } from "../components/StatusPill";
 import { ImagePicker } from "../components/ImagePicker";
 import { renderMarkdown } from "../lib/markdown";
 import { TurnImages } from "../components/TurnImages";
+import { AgentAvatar } from "../components/AgentAvatar";
+import { SpawnGraph } from "../components/SpawnGraph";
+import { RawView } from "../components/RawView";
+
+/** The glyph an agent without an avatar gets, by runtime — as the web UI drew it. */
+const GLYPH: Record<string, string> = { claude: "✦", codex: "◇", gemini: "◈", opencode: "◉" };
 
 export function ShowPage({ id }: { id: string }) {
-  const { client, conversations, agents, subscribe, refresh, toast } = useStore();
+  const { client, conversations, agents, subscribe, refresh, toast, canPrompt } = useStore();
   const [conv, setConv] = useState<Conversation | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [events, setEvents] = useState<LogEvent[]>([]);
@@ -105,7 +112,13 @@ export function ShowPage({ id }: { id: string }) {
   }, [events]);
 
   const visible = useMemo(() => new Set(prefs.visibleStreams), [prefs.visibleStreams]);
-  const items = useMemo(() => (prefs.viewMode === "timeline" ? timeline(events, turns) : []), [events, turns, prefs.viewMode]);
+  // The `reattach` pairs are bookkeeping: dropping them keeps post-crash
+  // output under the turn section that is still open above it.
+  const items = useMemo(
+    () => (prefs.viewMode === "timeline" ? timeline(events.filter((e) => !hiddenInPretty(e)), turns) : []),
+    [events, turns, prefs.viewMode],
+  );
+  const rawEvents = useMemo(() => (prefs.viewMode === "raw" ? events.filter((e) => eventVisible(e, visible)) : []), [events, visible, prefs.viewMode]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
@@ -116,6 +129,9 @@ export function ShowPage({ id }: { id: string }) {
       setDraft("");
       setImages([]);
       stick.current = true;
+      // A prompt to a cold conversation wakes it: the status and sandbox change.
+      client.getConversation(id).then(setConv).catch(() => undefined);
+      toast("Queued");
     } catch (err) {
       toast(describeError(err), "error");
     } finally {
@@ -136,6 +152,7 @@ export function ShowPage({ id }: { id: string }) {
       await fn();
       toast(label);
       void refresh();
+      client.getConversation(id).then(setConv).catch(() => undefined);
     } catch (err) {
       toast(describeError(err), "error");
     }
@@ -152,13 +169,15 @@ export function ShowPage({ id }: { id: string }) {
     );
   }
 
-  const live = current && current.status !== "terminated" && current.status !== "failed";
+  const live = !!current && current.status !== "terminated" && current.status !== "failed";
   const toggleStream = (s: string) => {
     const set = new Set(prefs.visibleStreams);
     if (set.has(s)) set.delete(s);
     else set.add(s);
     setPref({ visibleStreams: [...set] });
   };
+  const usage = current?.usage_total;
+  const runner = current?.sandbox?.runner;
 
   return (
     <div className="show">
@@ -169,27 +188,56 @@ export function ShowPage({ id }: { id: string }) {
         <div className="show-title">
           <div className="name">{current ? conversationLabel(current, turns[0]?.prompt) : "…"}</div>
           <div className="sub muted">
-            {agent?.name ?? "—"} · {current?.runtime}
+            {agent?.name ?? (current?.agent_id ? "(deleted agent)" : "(no agent)")} · {current?.runtime}
             {agent && ` · ${agent.model}`}
-            {current?.sandbox && <span className="mono"> · {current.sandbox.sprite_name}</span>}
+            {current?.sandbox && (
+              <span className="mono">
+                {" · "}
+                {current.sandbox.sprite_name}
+                {current.sandbox.provider ? ` (${current.sandbox.provider})` : ""} · {current.sandbox.status}
+              </span>
+            )}
+            {runner && (
+              <span title={runner.path ?? undefined}>
+                {" · "}
+                <span className={runner.online ? "ok" : "warn"}>●</span> {runner.name ?? runner.hostname ?? "runner"}
+              </span>
+            )}
             {current && <span className="mono"> · {shortId(current.id)}</span>}
+            {current?.vault_id && (
+              <>
+                {" · "}
+                <a href={paths.vault(current.vault_id)}>vault</a>
+              </>
+            )}
             {current?.parent_conversation_id && (
               <>
                 {" · "}
                 <a href={paths.show(current.parent_conversation_id)}>parent</a>
               </>
             )}
+            {current && <span className={`badge src-${current.source}`}>{current.source === "ui" ? "UI" : current.source === "agent" ? "Agent" : "API"}</span>}
+            {usage && (usage.input > 0 || usage.output > 0) && (
+              <span title="Tokens in / out across every turn">
+                {" · "}
+                {usage.input.toLocaleString()} in / {usage.output.toLocaleString()} out
+              </span>
+            )}
           </div>
         </div>
+        {current?.sandbox?.url && (
+          <a className="button secondary small" href={current.sandbox.url} target="_blank" rel="noreferrer noopener" title="The sandbox's own HTTP endpoint">
+            Preview ↗
+          </a>
+        )}
         {current && <StatusPill status={current.status} sandbox={current.sandbox?.status} />}
         <div className="row actions">
           <div className="seg">
-            <button className={prefs.viewMode === "chat" ? "on" : ""} onClick={() => setPref({ viewMode: "chat" })}>
-              Chat
-            </button>
-            <button className={prefs.viewMode === "timeline" ? "on" : ""} onClick={() => setPref({ viewMode: "timeline" })}>
-              Timeline
-            </button>
+            {(["chat", "timeline", "raw"] as ViewMode[]).map((m) => (
+              <button key={m} className={prefs.viewMode === m ? "on" : ""} onClick={() => setPref({ viewMode: m })}>
+                {m === "chat" ? "Chat" : m === "timeline" ? "Timeline" : "Raw"}
+              </button>
+            ))}
           </div>
           <button className={`secondary small ${showTree ? "on" : ""}`} onClick={() => setShowTree((v) => !v)} title="Spawn tree">
             Tree
@@ -218,7 +266,7 @@ export function ShowPage({ id }: { id: string }) {
                 await client.deleteConversation(id);
                 navigate(paths.index);
               },
-              "Delete this conversation and its transcript?",
+              "Delete this conversation and all its turns? This cannot be undone.",
             )}
           >
             Delete
@@ -226,7 +274,7 @@ export function ShowPage({ id }: { id: string }) {
         </div>
       </header>
 
-      {prefs.viewMode === "timeline" && (
+      {prefs.viewMode !== "chat" && (
         <div className="stream-toggles">
           {THREAD_STREAMS.map((s) => (
             <label key={s} className="check small">
@@ -237,17 +285,29 @@ export function ShowPage({ id }: { id: string }) {
         </div>
       )}
 
+      {showTree && tree && tree.length > 1 && (
+        <div className="graph-strip">
+          <SpawnGraph nodes={tree} currentId={id} />
+        </div>
+      )}
+
       <div className="show-body">
         <div className={`transcript ${prefs.viewMode}`} ref={scrollRef} onScroll={onScroll}>
           {loading && <div className="centered muted">Loading…</div>}
           {!loading && turns.length === 0 && events.length === 0 && (
-            <div className="centered muted empty-thread">
-              {current?.status === "pending" ? "Starting the sandbox…" : "No turns yet."}
-            </div>
+            <div className="centered muted empty-thread">{current?.status === "pending" ? "Starting the sandbox…" : "No turns yet."}</div>
           )}
           {prefs.viewMode === "chat" &&
             turns.map((turn) => (
-              <ChatTurn key={turn.id} turn={turn} events={eventsByTurn.get(turn.id) ?? []} conversationId={id} agentName={agent?.name ?? current?.runtime ?? "agent"} />
+              <ChatTurn
+                key={turn.id}
+                turn={turn}
+                events={eventsByTurn.get(turn.id) ?? []}
+                conversationId={id}
+                agentName={agent?.name ?? current?.runtime ?? "agent"}
+                glyph={GLYPH[current?.runtime ?? ""] ?? "🤖"}
+                avatar={agent && agent.avatar_media_type ? <AgentAvatar agent={agent} size={26} /> : null}
+              />
             ))}
           {prefs.viewMode === "timeline" &&
             items.map((item, i) =>
@@ -257,12 +317,14 @@ export function ShowPage({ id }: { id: string }) {
                 <LooseEvent key={item.id ?? i} ev={item} visible={visible} />
               ),
             )}
+          {prefs.viewMode === "raw" && !loading && <RawView events={rawEvents} />}
         </div>
         {showTree && (
           <aside className="tree">
             <div className="tree-head">Spawn tree</div>
             {tree === null && <div className="muted small">Loading…</div>}
-            {tree && <TreeView nodes={tree} currentId={id} />}
+            {tree && tree.length <= 1 && <div className="muted small">No sub-conversations.</div>}
+            {tree && tree.length > 1 && <TreeList nodes={tree} currentId={id} />}
             <a className="button secondary small" href={paths.new(id)}>
               New sub-conversation
             </a>
@@ -270,37 +332,55 @@ export function ShowPage({ id }: { id: string }) {
         )}
       </div>
 
-      <form
-        className="composer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void send();
-        }}
-      >
-        <div className="composer-main">
-          <textarea
-            rows={1}
-            value={draft}
-            placeholder={live ? "Follow-up prompt… (Enter to send, Shift+Enter for a new line)" : "This conversation is finished — a prompt starts nothing here."}
-            disabled={!live}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKey}
-          />
-          <ImagePicker images={images} onChange={setImages} />
+      {!canPrompt ? (
+        <div className="readonly-banner">
+          Read-only: your subscription is inactive, so you can view this conversation and stop running work but not send prompts.{" "}
+          <a href={`${client.baseUrl}/account/billing`} target="_blank" rel="noreferrer noopener">
+            Update billing ↗
+          </a>
         </div>
-        <button type="submit" className="send" disabled={!live || sending || !draft.trim()} aria-label="Send">
-          ↑
-        </button>
-      </form>
+      ) : (
+        <form
+          className="composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send();
+          }}
+        >
+          <div className="composer-main">
+            <textarea
+              rows={1}
+              value={draft}
+              placeholder={live ? "Follow-up prompt… (Enter to send, Shift+Enter for a new line)" : "This conversation is finished — a prompt starts nothing here."}
+              disabled={!live}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKey}
+            />
+            <ImagePicker images={images} onChange={setImages} />
+          </div>
+          <button type="submit" className="send" disabled={!live || sending || !draft.trim()} aria-label="Send">
+            ↑
+          </button>
+        </form>
+      )}
     </div>
   );
 }
 
+/**
+ * One stage section. `turn` sections render their output as block cards,
+ * container sections recurse, and a finished leaf (packages, setup) starts
+ * collapsed — the web UI's open policy.
+ */
 function SectionView({ section, visible, conversationId }: { section: Section; visible: Set<string>; conversationId: string }) {
-  const state = sectionState(section);
+  const mode = childMode(section);
+  const state = section.ended?.state ?? (section.started ? "started" : "unknown");
+  const hiddenStage = !visible.has("stage");
+  const shown = section.children.filter((c) => isSection(c) || eventVisible(c, visible));
+
   // Adjacent output events render as one arranged run; nested sections in place.
   const runs: Array<{ kind: "run"; events: LogEvent[] } | { kind: "section"; section: Section }> = [];
-  for (const child of section.children) {
+  for (const child of shown) {
     if (isSection(child)) runs.push({ kind: "section", section: child });
     else {
       const last = runs[runs.length - 1];
@@ -308,38 +388,35 @@ function SectionView({ section, visible, conversationId }: { section: Section; v
       else runs.push({ kind: "run", events: [child] });
     }
   }
-  const hiddenStage = !visible.has("stage");
-  return (
-    <div className={`stage ${state} ${hiddenStage ? "no-stage" : ""}`}>
-      {!hiddenStage && (
-        <div className="stage-head">
-          <span className="stage-dot" />
-          <span className="stage-name">{section.stage}</span>
-          {section.turn && <span className="stage-turn">turn {section.turn.turn_number}</span>}
-          <span className="stage-state muted">{state}</span>
-          {section.ended?.duration_ms != null && <span className="muted">{formatDuration(section.ended.duration_ms)}</span>}
-          <span className="stage-time muted">{formatClock(section.started?.ts ?? section.ended?.ts)}</span>
-        </div>
-      )}
+
+  const body = (
+    <>
       {section.turn && (
         <div className="stage-prompt">
-          <div className="label">prompt</div>
+          <div className="label">👤 prompt</div>
           <div className="md">{renderMarkdown(section.turn.prompt)}</div>
           {section.turn.image_count > 0 && <TurnImages conversationId={conversationId} turn={section.turn} />}
         </div>
       )}
-      {!hiddenStage && stageMeta(section.started, section.ended)}
       <div className="stage-blocks">
         {runs.map((r, i) =>
           r.kind === "section" ? (
             <SectionView key={r.section.key} section={r.section} visible={visible} conversationId={conversationId} />
+          ) : mode === "text" ? (
+            <pre key={i} className="stage-text">
+              {r.events.map((e, j) => (
+                <span key={j} className={e.stream === "stderr" ? "rose" : ""}>
+                  {e.data}
+                </span>
+              ))}
+            </pre>
           ) : (
             <div key={i} className="stage-run">
-              {arrange(r.events.filter((e) => e.kind === "output"), visible).map((b, j) => (
+              {arrange(r.events.filter((e) => e.kind === "output")).map((b, j) => (
                 <BlockView key={j} block={b} />
               ))}
               {r.events
-                .filter((e) => e.kind === "stage" && visible.has("stage"))
+                .filter((e) => e.kind === "stage")
                 .map((e) => (
                   <LooseEvent key={e.id} ev={e} visible={visible} />
                 ))}
@@ -347,49 +424,62 @@ function SectionView({ section, visible, conversationId }: { section: Section; v
           ),
         )}
       </div>
-    </div>
+    </>
+  );
+
+  if (hiddenStage) return <div className={`stage ${state} no-stage`}>{body}</div>;
+
+  return (
+    <details className={`stage ${state}`} open={defaultOpen(section)}>
+      <summary className="stage-head">
+        <span className="stage-dot" />
+        <span className="stage-icon">{stageIcon(section.stage)}</span>
+        <span className="stage-name">{section.stage}</span>
+        {section.turn && <span className="stage-turn">turn {section.turn.turn_number}</span>}
+        <span className={`stage-state ${state}`}>{state}</span>
+        <span className="stage-dur muted">{formatDurationMs(sectionDuration(section))}</span>
+        <span className="stage-extra mono muted ellipsis">{stageExtra(section.started?.data ?? section.ended?.data)}</span>
+        <span className="stage-time muted">{formatClock(section.started?.ts ?? section.ended?.ts)}</span>
+      </summary>
+      {body}
+    </details>
   );
 }
 
 function LooseEvent({ ev, visible }: { ev: LogEvent; visible: Set<string> }) {
+  if (!eventVisible(ev, visible)) return null;
   if (ev.kind === "stage") {
-    if (!visible.has("stage")) return null;
     return (
       <div className="stage-loose mono muted">
-        {ev.stage}/{ev.state} {formatClock(ev.ts)}
-        {ev.duration_ms != null && ` · ${formatDuration(ev.duration_ms)}`}
+        {stageIcon(ev.stage)} {ev.stage}/{ev.state} {formatClock(ev.ts)}
+        {ev.duration_ms != null && ` · ${formatDurationMs(ev.duration_ms)}`} {stageExtra(ev.data)}
       </div>
     );
   }
   return (
     <>
-      {arrange([ev], visible).map((b, i) => (
+      {arrange([ev]).map((b, i) => (
         <BlockView key={i} block={b} />
       ))}
     </>
   );
 }
 
-function stageMeta(started: LogEvent | null, ended: LogEvent | null) {
-  const bits: string[] = [];
-  for (const ev of [started, ended]) {
-    if (!ev?.data) continue;
-    try {
-      const obj = JSON.parse(ev.data) as Record<string, unknown>;
-      for (const [k, v] of Object.entries(obj)) {
-        if (v == null || v === "" || k === "message") continue;
-        bits.push(`${k}=${typeof v === "string" ? v : JSON.stringify(v)}`);
-      }
-      if (typeof obj.message === "string") bits.unshift(obj.message);
-    } catch {
-      bits.push(ev.data);
-    }
-  }
-  if (!bits.length) return null;
-  return <div className="stage-meta mono muted">{bits.join(" · ")}</div>;
-}
-
-function ChatTurn({ turn, events, conversationId, agentName }: { turn: Turn; events: LogEvent[]; conversationId: string; agentName: string }) {
+function ChatTurn({
+  turn,
+  events,
+  conversationId,
+  agentName,
+  glyph,
+  avatar,
+}: {
+  turn: Turn;
+  events: LogEvent[];
+  conversationId: string;
+  agentName: string;
+  glyph: string;
+  avatar: ReactNode;
+}) {
   const blocks = useMemo(() => arrange(events, new Set(["acp", "stdout"])), [events]);
   const inFlight = turn.status === "pending" || turn.status === "running";
   const failed = turn.status === "failed" || turn.status === "cancelled" || turn.status === "interrupted";
@@ -398,9 +488,12 @@ function ChatTurn({ turn, events, conversationId, agentName }: { turn: Turn; eve
       <div className="bubble you">
         <div className="body">{turn.prompt}</div>
         {turn.image_count > 0 && <TurnImages conversationId={conversationId} turn={turn} />}
-        <div className="meta">{formatTime(turn.inserted_at)}</div>
+        <div className="meta">{formatTime(turn.started_at ?? turn.inserted_at)}</div>
       </div>
-      <div className="them-label muted small">{agentName}</div>
+      <div className="them-label muted small">
+        <span className="them-avatar">{avatar ?? <span className="glyph">{glyph}</span>}</span>
+        {agentName}
+      </div>
       {blocks
         .filter((b) => b.kind !== "init" && b.kind !== "result")
         .map((b, i) => (
@@ -419,15 +512,15 @@ function ChatTurn({ turn, events, conversationId, agentName }: { turn: Turn; eve
   );
 }
 
-function TreeView({ nodes, currentId }: { nodes: TreeNode[]; currentId: string }) {
+function TreeList({ nodes, currentId }: { nodes: TreeNode[]; currentId: string }) {
   const children = new Map<string | null, TreeNode[]>();
+  const ids = new Set(nodes.map((n) => n.id));
   for (const n of nodes) {
-    const arr = children.get(n.parent_id) ?? [];
+    const p = n.parent_id && ids.has(n.parent_id) ? n.parent_id : null;
+    const arr = children.get(p) ?? [];
     arr.push(n);
-    children.set(n.parent_id, arr);
+    children.set(p, arr);
   }
-  const rootIds = new Set(nodes.map((n) => n.id));
-  const roots = nodes.filter((n) => !n.parent_id || !rootIds.has(n.parent_id));
   const render = (n: TreeNode, depth: number): ReactNode => (
     <div key={n.id}>
       <a href={paths.show(n.id)} className={`tree-node ${n.id === currentId ? "current" : ""}`} style={{ paddingLeft: 8 + depth * 14 }}>
@@ -438,6 +531,5 @@ function TreeView({ nodes, currentId }: { nodes: TreeNode[]; currentId: string }
       {(children.get(n.id) ?? []).map((c) => render(c, depth + 1))}
     </div>
   );
-  if (nodes.length <= 1) return <div className="muted small">No sub-conversations.</div>;
-  return <div>{roots.map((r) => render(r, 0))}</div>;
+  return <div>{(children.get(null) ?? []).map((r) => render(r, 0))}</div>;
 }

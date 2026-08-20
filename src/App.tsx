@@ -13,6 +13,11 @@ import { AgentsPage } from "./pages/Agents";
 import { AgentFormPage } from "./pages/AgentForm";
 import { EnvironmentsPage, EnvironmentFormPage } from "./pages/Environments";
 import { VaultsPage, VaultFormPage } from "./pages/Vaults";
+import { Sidebar } from "./components/Sidebar";
+import { ShortcutSheet, useShortcuts } from "./components/Shortcuts";
+import { applyTheme, loadTheme, nextTheme, saveTheme } from "./lib/theme";
+
+applyTheme(loadTheme());
 
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(() => loadSettings());
@@ -72,16 +77,33 @@ export function App() {
   );
 }
 
+const THEME_GLYPH = { system: "◐", light: "☀", dark: "☾" } as const;
+
 function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: () => void }) {
   const route = useRoute();
   const { connected, client } = useStore();
+  const { sheetOpen, closeSheet } = useShortcuts();
+  const [theme, setTheme] = useState(() => loadTheme());
+  const [drawer, setDrawer] = useState(false);
+  const currentId = route.page === "show" || route.page === "logs" ? route.id : null;
+  const convPage = route.page === "index" || route.page === "new" || route.page === "show" || route.page === "logs";
+
+  const cycleTheme = () => {
+    const t = nextTheme(theme);
+    saveTheme(t);
+    setTheme(t);
+  };
+
   return (
     <div className="app">
       <nav className="topbar">
+        <button type="button" className="icon menu" onClick={() => setDrawer((v) => !v)} aria-label="Toggle the conversation list">
+          ☰
+        </button>
         <a href={paths.index} className="brand">
           ⛲ Fountain
         </a>
-        <a href={paths.index} className={`navlink ${route.page === "index" || route.page === "new" || route.page === "show" || route.page === "logs" ? "on" : ""}`}>
+        <a href={paths.index} className={`navlink ${convPage ? "on" : ""}`}>
           Conversations
         </a>
         <a href={paths.agents} className={`navlink ${route.page === "agents" || route.page === "agent" ? "on" : ""}`}>
@@ -96,9 +118,12 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
         <span className={`link-dot ${connected ? "on" : "off"}`} title={connected ? "Live" : "Reconnecting…"} />
         <span className="muted small host">{client.baseUrl.replace(/^https?:\/\//, "")}</span>
         <span className="spacer" />
-        <a href={paths.new()} className="button small">
-          New
+        <a href={`${client.baseUrl}/help`} className="navlink small" target="_blank" rel="noreferrer noopener" title="Fountain help">
+          Help
         </a>
+        <button type="button" className="icon" onClick={cycleTheme} title={`Theme: ${theme} (click to change)`} aria-label={`Theme: ${theme}`}>
+          {THEME_GLYPH[theme]}
+        </button>
         <button className="icon" onClick={onSettings} title="Settings" aria-label="Settings">
           ⚙
         </button>
@@ -106,18 +131,23 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
           Sign out
         </button>
       </nav>
-      <main className="main">
-        {route.page === "index" && <IndexPage />}
-        {route.page === "new" && <NewPage parentId={route.parentId} />}
-        {route.page === "show" && <ShowPage key={route.id} id={route.id} />}
-        {route.page === "logs" && <LogsPage key={route.id} id={route.id} />}
-        {route.page === "agents" && <AgentsPage />}
-        {route.page === "agent" && <AgentFormPage key={route.id} id={route.id} />}
-        {route.page === "environments" && <EnvironmentsPage />}
-        {route.page === "environment" && <EnvironmentFormPage key={route.id} id={route.id} />}
-        {route.page === "vaults" && <VaultsPage />}
-        {route.page === "vault" && <VaultFormPage key={route.id} id={route.id} />}
-      </main>
+      <div className="shell-body">
+        <Sidebar currentId={currentId} open={drawer} onNavigate={() => setDrawer(false)} />
+        {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
+        <main className="main">
+          {route.page === "index" && <IndexPage />}
+          {route.page === "new" && <NewPage parentId={route.parentId} />}
+          {route.page === "show" && <ShowPage key={route.id} id={route.id} />}
+          {route.page === "logs" && <LogsPage key={route.id} id={route.id} />}
+          {route.page === "agents" && <AgentsPage />}
+          {route.page === "agent" && <AgentFormPage key={route.id} id={route.id} />}
+          {route.page === "environments" && <EnvironmentsPage />}
+          {route.page === "environment" && <EnvironmentFormPage key={route.id} id={route.id} />}
+          {route.page === "vaults" && <VaultsPage />}
+          {route.page === "vault" && <VaultFormPage key={route.id} id={route.id} />}
+        </main>
+      </div>
+      {sheetOpen && <ShortcutSheet onClose={closeSheet} />}
     </div>
   );
 }

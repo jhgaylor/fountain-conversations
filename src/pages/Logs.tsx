@@ -4,12 +4,14 @@ import { paths } from "../router";
 import { THREAD_STREAMS, describeError } from "../api/client";
 import type { LogEvent } from "../api/types";
 import { formatClock } from "../lib/format";
+import { loadPrefs, savePrefs } from "../lib/prefs";
 
 /** The raw event log: every row as stored, tailing live. What `/conversations/:id/logs` shows. */
 export function LogsPage({ id }: { id: string }) {
   const { client, subscribe, toast } = useStore();
   const [events, setEvents] = useState<LogEvent[]>([]);
-  const [visible, setVisible] = useState<Set<string>>(new Set(THREAD_STREAMS));
+  // Remembered per browser, like the transcript's own toggles.
+  const [visible, setVisible] = useState<Set<string>>(() => new Set(loadPrefs().logStreams));
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -28,10 +30,15 @@ export function LogsPage({ id }: { id: string }) {
 
   useEffect(() => subscribe(id, (ev) => setEvents((es) => (es.some((e) => e.id === ev.id) ? es : [...es, ev]))), [subscribe, id]);
 
+  const stick = useRef(true);
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [events.length]);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -48,6 +55,7 @@ export function LogsPage({ id }: { id: string }) {
       const n = new Set(v);
       if (n.has(s)) n.delete(s);
       else n.add(s);
+      savePrefs({ logStreams: [...n] });
       return n;
     });
 
@@ -72,7 +80,7 @@ export function LogsPage({ id }: { id: string }) {
           <span className="muted small">{rows.length}/{events.length}</span>
         </div>
       </header>
-      <div className="log-body" ref={scrollRef}>
+      <div className="log-body" ref={scrollRef} onScroll={onScroll}>
         {loading && <div className="muted">Loading…</div>}
         <table className="log-table">
           <tbody>

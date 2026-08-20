@@ -6,16 +6,26 @@ the agents, environments and vaults they run on — the user-facing pages as a
 static app on its own origin, talking only to the Fountain API with an API key
 you paste in once.
 
-- **Conversations** — every conversation, live status and unread dots over one
-  SSE connection, sort by activity or creation, roots-only, delete.
+- **Sidebar** — every conversation beside every page, grouped the way the web
+  UI grouped them (running first, then Today / Yesterday / Past 7 days /
+  Older), each row the task read out of its first prompt, the agent's avatar,
+  an unread dot, turn and sub-conversation counts; roots-only and per-agent
+  filters.
+- **Conversations** — the full table: status, task, agent, runtime, source,
+  started and last-active (both sortable), terminate and delete per row.
 - **New** — agent, environment (the agent's own by default, narrowed by its
   allowlist), vault, first prompt, images; ⌘/Ctrl+Enter to start.
-- **Conversation** — *Chat* mode (bubbles, tool cards, thinking) and *Timeline*
-  mode (every lifecycle stage — provision, setup, turn, reattach, sandbox,
-  terminate — with durations, the turn's prompt and output nested under it,
-  per-stream toggles for `acp` / `stdout` / `stderr` / `stage`); follow-up
-  prompts with images; interrupt, terminate, delete; the spawn tree with
-  sub-conversation navigation; a link to the raw log.
+- **Conversation** — *Chat* mode (bubbles, tool cards, thinking, the agent's
+  avatar), *Timeline* mode (every lifecycle stage — provision, setup, turn,
+  sandbox, terminate — with icons, durations, the stage's own `k=v` detail,
+  the turn's prompt and output nested under it) and *Raw* mode (the bytes as
+  stored, `reattach` included); per-stream toggles for `acp` / `stdout` /
+  `stderr` / `stage`; follow-up prompts with images; interrupt, terminate,
+  delete; the sandbox's provider, runner and preview URL; token usage; the
+  spawn tree drawn as a graph, with sub-conversation navigation; a link to
+  the raw log.
+- **Keyboard** — `?` for the sheet, `g c` / `g l` / `g a` / `g e` / `g v` to
+  jump, Enter to send.
 - **Logs** — the raw event rows as stored, tailing live, filterable by stream
   and text.
 - **Agents** — list, search, filter by runtime; create/edit with runtime, model
@@ -39,6 +49,9 @@ renders, so this client only arranges them (`src/lib/blocks.ts`).
 bun install
 bun run dev        # http://localhost:5173
 ```
+
+The theme follows your OS by default; the ◐ button in the top bar pins light
+or dark.
 
 On first load, enter your Fountain URL and **Sign in with Fountain** — it opens
 Fountain to approve access and brings you back signed in, nothing to copy

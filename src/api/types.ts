@@ -1,10 +1,21 @@
 // Shapes as served by the Fountain API (docs/api.md).
 
+export interface Runner {
+  id: string | null;
+  name: string | null;
+  hostname: string | null;
+  online: boolean;
+  path: string | null;
+}
+
 export interface Sandbox {
   id: string;
   sprite_name: string;
   status: string;
+  provider?: string | null;
   url: string | null;
+  /** Where a runner-backed sandbox lives; null for hosted providers. */
+  runner?: Runner | null;
 }
 
 export type ConversationStatus = "pending" | "running" | "idle" | "failed" | "terminated";
@@ -12,6 +23,8 @@ export type ConversationStatus = "pending" | "running" | "idle" | "failed" | "te
 export interface Conversation {
   id: string;
   title: string | null;
+  /** The first turn's prompt (null until it exists; absent from older servers). */
+  first_prompt?: string | null;
   sandbox_id: string | null;
   sandbox: Sandbox | null;
   agent_id: string | null;
@@ -28,8 +41,18 @@ export interface Conversation {
   last_active_at: string | null;
   last_read_at: string | null;
   unread: boolean;
+  usage_total?: { input: number; output: number };
   inserted_at: string;
   updated_at: string;
+}
+
+/** `GET /api/account/billing` — null when the server runs with billing disabled. */
+export interface Billing {
+  status: string;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  has_stripe_customer: boolean;
 }
 
 export interface Agent {

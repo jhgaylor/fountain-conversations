@@ -5,10 +5,13 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FountainClient, describeError } from "./api/client";
-import type { Agent, Conversation, UserEvent } from "./api/types";
+import type { Agent, Billing, Conversation, UserEvent } from "./api/types";
 import type { Settings } from "./lib/settings";
 
 export type EventHandler = (ev: UserEvent) => void;
+
+/** Statuses that let a tenant spend: the server's own list (ee/lib/fountain/billing.ex). */
+const ACTIVE_STATUSES = ["trialing", "active", "comped"];
 
 export interface Store {
   client: FountainClient;
@@ -16,6 +19,10 @@ export interface Store {
   agents: Map<string, Agent>;
   connected: boolean;
   error: string | null;
+  /** Billing state, or null where the server has billing disabled (self-hosted). */
+  billing: Billing | null;
+  /** False only when billing is on and the subscription has lapsed — prompts are refused. */
+  canPrompt: boolean;
   refresh: () => Promise<Conversation[] | null>;
   /** Events for one conversation, live. Returns the unsubscribe. */
   subscribe: (conversationId: string, handler: EventHandler) => () => void;
@@ -42,6 +49,7 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
   const [agents, setAgents] = useState<Map<string, Agent>>(new Map());
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [billing, setBilling] = useState<Billing | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const handlers = useRef(new Map<string, Set<EventHandler>>());
 
@@ -68,6 +76,10 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
     client
       .listAgents()
       .then((list) => setAgents(new Map(list.map((a) => [a.id, a]))))
+      .catch(() => undefined);
+    client
+      .billing()
+      .then(setBilling)
       .catch(() => undefined);
   }, [client, refresh]);
 
@@ -151,9 +163,13 @@ export function StoreProvider({ settings, children }: { settings: Settings; chil
     };
   }, [client, refresh, scheduleRefresh]);
 
+  // Billing absent means the server does not gate on it; a status outside the
+  // active set means the account is read-only until it is resolved.
+  const canPrompt = billing === null || ACTIVE_STATUSES.includes(billing.status);
+
   const value = useMemo<Store>(
-    () => ({ client, conversations, agents, connected, error, refresh, subscribe, toast }),
-    [client, conversations, agents, connected, error, refresh, subscribe, toast],
+    () => ({ client, conversations, agents, connected, error, billing, canPrompt, refresh, subscribe, toast }),
+    [client, conversations, agents, connected, error, billing, canPrompt, refresh, subscribe, toast],
   );
 
   return (

@@ -131,7 +131,7 @@ function Shell({ onSettings, onSignOut }: { onSettings: () => void; onSignOut: (
           Sign out
         </button>
       </nav>
-      <div className="body">
+      <div className="shell-body">
         <Sidebar currentId={currentId} open={drawer} onNavigate={() => setDrawer(false)} />
         {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
         <main className="main">

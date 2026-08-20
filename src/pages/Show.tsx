@@ -4,7 +4,7 @@ import { navigate, paths } from "../router";
 import { describeError, THREAD_STREAMS } from "../api/client";
 import type { Conversation, ImageInput, LogEvent, TreeNode, Turn, UserEvent } from "../api/types";
 import { arrange, isSection, timeline, type Section } from "../lib/blocks";
-import { childMode, defaultOpen, eventVisible, formatDurationMs, hiddenInPretty, stageExtra, stageIcon } from "../lib/stages";
+import { childMode, defaultOpen, eventVisible, formatDurationMs, hiddenInPretty, sectionDuration, stageExtra, stageIcon } from "../lib/stages";
 import { loadPrefs, savePrefs, type ViewMode } from "../lib/prefs";
 import { conversationLabel, formatClock, formatTime, shortId } from "../lib/format";
 import { BlockView } from "../components/Blocks";
@@ -285,6 +285,12 @@ export function ShowPage({ id }: { id: string }) {
         </div>
       )}
 
+      {showTree && tree && tree.length > 1 && (
+        <div className="graph-strip">
+          <SpawnGraph nodes={tree} currentId={id} />
+        </div>
+      )}
+
       <div className="show-body">
         <div className={`transcript ${prefs.viewMode}`} ref={scrollRef} onScroll={onScroll}>
           {loading && <div className="centered muted">Loading…</div>}
@@ -317,11 +323,6 @@ export function ShowPage({ id }: { id: string }) {
           <aside className="tree">
             <div className="tree-head">Spawn tree</div>
             {tree === null && <div className="muted small">Loading…</div>}
-            {tree && tree.length > 1 && (
-              <div className="graph-wrap">
-                <SpawnGraph nodes={tree} currentId={id} />
-              </div>
-            )}
             {tree && tree.length <= 1 && <div className="muted small">No sub-conversations.</div>}
             {tree && tree.length > 1 && <TreeList nodes={tree} currentId={id} />}
             <a className="button secondary small" href={paths.new(id)}>
@@ -436,7 +437,7 @@ function SectionView({ section, visible, conversationId }: { section: Section; v
         <span className="stage-name">{section.stage}</span>
         {section.turn && <span className="stage-turn">turn {section.turn.turn_number}</span>}
         <span className={`stage-state ${state}`}>{state}</span>
-        <span className="stage-dur muted">{formatDurationMs(section.ended?.duration_ms ?? null)}</span>
+        <span className="stage-dur muted">{formatDurationMs(sectionDuration(section))}</span>
         <span className="stage-extra mono muted ellipsis">{stageExtra(section.started?.data ?? section.ended?.data)}</span>
         <span className="stage-time muted">{formatClock(section.started?.ts ?? section.ended?.ts)}</span>
       </summary>

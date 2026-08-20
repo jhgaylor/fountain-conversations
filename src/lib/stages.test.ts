@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { childMode, defaultOpen, eventVisible, formatDurationMs, hiddenInPretty, stageExtra, stageIcon } from "./stages";
+import { childMode, defaultOpen, eventVisible, formatDurationMs, hiddenInPretty, sectionDuration, stageExtra, stageIcon } from "./stages";
 import type { Section } from "./blocks";
 import type { LogEvent } from "../api/types";
 
@@ -19,7 +19,17 @@ describe("stages", () => {
   test("durations", () => {
     expect(formatDurationMs(450)).toBe("450ms");
     expect(formatDurationMs(1234)).toBe("1.2s");
+    expect(formatDurationMs(3_946_000)).toBe("1h 6m");
+    expect(formatDurationMs(412_000)).toBe("6m 52s");
     expect(formatDurationMs(null)).toBe("…");
+  });
+  test("sectionDuration pairs the timestamps the server leaves unfilled", () => {
+    const sec = (over: Partial<Section>): Section => ({ kind: "section", key: "k", stage: "turn", started: null, ended: null, turn: null, children: [], ...over });
+    const started = ev({ kind: "stage", state: "started", ts: "2026-08-20T03:47:13.000000Z" });
+    const ended = ev({ kind: "stage", state: "done", ts: "2026-08-20T03:47:20.000000Z" });
+    expect(sectionDuration(sec({ started, ended }))).toBe(7000);
+    expect(sectionDuration(sec({ started, ended: { ...ended, duration_ms: 42 } }))).toBe(42);
+    expect(sectionDuration(sec({ started }))).toBeNull();
   });
   test("child mode and default open", () => {
     const leaf: Section = { kind: "section", key: "a", stage: "packages", started: ev({ kind: "stage" }), ended: ev({ kind: "stage", state: "done" }), turn: null, children: [ev({})] };

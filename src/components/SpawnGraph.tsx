@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { layoutTree, NODE_H, NODE_W } from "../lib/graph";
 import { navigate, paths } from "../router";
 import { shortId } from "../lib/format";
@@ -10,8 +10,21 @@ const STROKE: Record<string, string> = { ui: "#3b82f6", agent: "#d97706" };
 /** The spawn tree the web UI drew with d3 — nodes by source, the open one glowing, click to jump. */
 export function SpawnGraph({ nodes, currentId }: { nodes: TreeNode[]; currentId: string }) {
   const layout = useMemo(() => layoutTree(nodes), [nodes]);
+  const ref = useRef<SVGSVGElement>(null);
+
+  // A wide fan-out opens scrolled to the left, with the conversation you are
+  // reading somewhere off-screen. Bring it into view.
+  useEffect(() => {
+    const svg = ref.current;
+    const box = svg?.parentElement;
+    const me = layout.nodes.find((n) => n.node.id === currentId);
+    if (!svg || !box || !me) return;
+    box.scrollLeft = Math.max(0, me.x + NODE_W / 2 - box.clientWidth / 2);
+    box.scrollTop = Math.max(0, me.y - 20);
+  }, [layout, currentId]);
+
   return (
-    <svg className="spawn-graph" viewBox={`0 0 ${layout.width} ${layout.height}`} width={layout.width} height={layout.height} role="img" aria-label="Spawn graph">
+    <svg ref={ref} className="spawn-graph" viewBox={`0 0 ${layout.width} ${layout.height}`} width={layout.width} height={layout.height} role="img" aria-label="Spawn graph">
       <defs>
         <filter id="cg-glow" x="-50%" y="-50%" width="200%" height="200%">
           <feGaussianBlur stdDeviation="3" result="blur" />

@@ -55,10 +55,29 @@ function cut(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
-/** `ms` under a second, else one decimal of seconds; "…" while still open. */
+/**
+ * How long a section took. `duration_ms` is a column the server serves but
+ * never fills — the web UI paired the timestamps at read time, and so do we;
+ * the column wins where a future writer does populate it.
+ */
+export function sectionDuration(section: Section): number | null {
+  if (section.ended?.duration_ms != null) return section.ended.duration_ms;
+  if (!section.started?.ts || !section.ended?.ts) return null;
+  const ms = Date.parse(section.ended.ts) - Date.parse(section.started.ts);
+  return Number.isNaN(ms) || ms < 0 ? null : ms;
+}
+
+/**
+ * `ms` under a second, then seconds to one decimal; minutes and hours get
+ * their own units rather than the web UI's four-digit "3946.0s".
+ * "…" while the section is still open.
+ */
 export function formatDurationMs(ms: number | null | undefined): string {
   if (ms == null) return "…";
-  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+  return `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m`;
 }
 
 export type ChildMode = "cards" | "recursive" | "text";

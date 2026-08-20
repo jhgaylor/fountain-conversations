@@ -63,7 +63,7 @@ export class FountainClient {
    */
   async billing(): Promise<Billing | null> {
     try {
-      return await this.json<Billing>("GET", "/api/account/billing");
+      return (await this.json<{ data: Billing }>("GET", "/api/account/billing")).data;
     } catch (err) {
       if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return null;
       throw err;
